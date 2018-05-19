@@ -1,0 +1,10 @@
+*.iml
+.idea/
+**/tests/reports/
+logs/
+*.pyc
+.pytest_cache/
+.coverage
+.eggs/*
+dist/
+*.egg-info/
