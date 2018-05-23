@@ -4,6 +4,7 @@ import psutil
 import os
 import pwd
 
+from datetime import datetime
 from stat import S_IRGRP, S_IRUSR
 from subprocess import check_output
 from glob import glob
@@ -33,9 +34,7 @@ class Base(object):
         self.logs = []
 
     def file_change_timestamp(self, file_path):
-        time_stat = self.os_stat(file_path).st_mtime
-
-        return time_stat
+        return self.os_stat(file_path).st_mtime
 
     def file_name(self, file_path):
         return os.path.basename(file_path)
@@ -95,7 +94,7 @@ class Base(object):
         try:
             return self.all_pids()
         except psutil.AccessDenied:
-            return 'Permission Denied'
+            return []
 
     def current_user(self):
         return pwd.getpwuid(os.getuid())[0]
@@ -106,7 +105,7 @@ class Base(object):
     def check_file_read_perms(self, file_path):
         st = self.os_stat(file_path)
 
-        return bool(st.st_mode & S_IRGRP)
+        return bool(st.st_mode & S_IRUSR)
 
     def read_file(self, file_path):
         with open(file_path, 'r') as f:
@@ -114,6 +113,9 @@ class Base(object):
 
     def os_stat(self, path):
         return os.stat(path)
+
+    def datetime_now(self):
+        return datetime.now()
 
     def pretty_print(self, message, message_type=''):
         if type(message) is list:

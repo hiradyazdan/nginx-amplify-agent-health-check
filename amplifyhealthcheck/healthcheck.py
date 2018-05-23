@@ -42,14 +42,24 @@ class AmplifyAgentHealthCheck(Base):
         # System
         self.max_time_diff_allowance = attrs['max_time_diff_allowance']
 
-        self.ngx_worker_onwer = None
+        self.amp_pid = None
+        self.amp_owner = None
+        self.amp_ps_name = None
+        self.ngx_pid = None
+        self.ngx_owner = None
         self.ngx_worker_pid = None
+        self.ngx_worker_onwer = None
 
+    def configure(self):
         self.amp_pid = self.read_file(self.amp_pid_file)[0]
         self.amp_owner = self.ps_owner(self.amp_pid)
         self.amp_ps_name = self.ps_name(self.amp_pid)
         self.ngx_pid = self.read_file(self.ngx_pid_file)[0]
         self.ngx_owner = self.ps_owner(self.ngx_pid)
+        self.ngx_worker_pid = self.pid('nginx: worker process')[0]
+        self.ngx_worker_onwer = self.ps_owner(self.ngx_worker_pid)
+
+        return self
 
     def generate_output(self):
         print '\n----- {0}{1}{2} -----\n'.format(self.cyan_color, self.heading, self.no_color)
@@ -71,16 +81,18 @@ class AmplifyAgentHealthCheck(Base):
                 fail_count += 1
                 self.pretty_print(exc, 'error')
 
+        return fail_count
+
     def verify_py_pkgs(self, packages, fail_count):
         rgx = '[^a-zA-Z0-9.]'
 
         for pkg in packages:
             try:
-                dep_match = sub(rgx, '', pkg)
-                py_pkgs = list(pkg_resources.find_distributions('%s/amplify' % self.amp_agent_path))
-                py_pkgs = [sub(rgx, '', str(package)) for package in py_pkgs]
+                required_pkg = sub(rgx, '', pkg)
+                installed_pkgs = list(pkg_resources.find_distributions('%s/amplify' % self.amp_agent_path))
+                installed_pkgs = [sub(rgx, '', str(package)) for package in installed_pkgs]
 
-                if dep_match not in py_pkgs:
+                if required_pkg not in installed_pkgs:
                     pkg_resources.require(pkg)
 
                 if self.verbose:
@@ -89,83 +101,112 @@ class AmplifyAgentHealthCheck(Base):
                 fail_count += 1
                 self.pretty_print(exc, 'error')
 
+        return fail_count
+
     def verify_all_packages(self, packages, requirements_file, find_sys_pkg_cmd):
         fail_count = 0
-        deps_path = '{0}{1}'.format(self.amp_agent_path, requirements_file)
+        deps_path = '{}{}'.format(self.amp_agent_path, requirements_file)
         required_deps = filter(None, self.read_file(deps_path))
 
-        self.verify_sys_pkgs(packages, find_sys_pkg_cmd, fail_count)
-        self.verify_py_pkgs(required_deps, fail_count)
+        fail_count = self.verify_sys_pkgs(packages, find_sys_pkg_cmd, fail_count)
+        fail_count = self.verify_py_pkgs(required_deps, fail_count)
 
         if fail_count is 0 and not self.verbose:
             self.pretty_print('All system and python packages are installed')
 
+        return fail_count
+
     def verify_agent_ps(self):
+        fail_count = 0
         pid_file = self.check_file(self.amp_pid_file)
 
         if pid_file:
             self.pretty_print('Amplify agent is running...')
         else:
+            fail_count += 1
             self.pretty_print('Amplify agent is NOT running...', 'error')
 
+        return fail_count
+
     def verify_agent_log(self):
+        fail_count = 0
         log_file = self.check_file(self.amp_log_file)
         logs = self.read_file(self.amp_log_file)
 
-        if log_file and logs > 0:
+        if log_file and len(logs) > 0:
             self.pretty_print('Amplify {0} file exists and is being updated'.format(self.file_name(self.amp_log_file)))
         elif not log_file:
+            fail_count += 1
             self.pretty_print('Amplify {0} file does NOT exist'.format(self.file_name(self.amp_log_file)), 'error')
         else:
+            fail_count += 1
             self.pretty_print('Amplify {0} file is NOT being updated'
                               .format(self.file_name(self.amp_log_file)), 'error')
 
+        return fail_count
+
     def verify_agent_user(self):
-        self.ngx_worker_pid = self.pid('nginx: worker process')[0]
-        self.ngx_worker_onwer = self.ps_owner(self.ngx_worker_pid)
+        fail_count = 0
 
         if self.amp_owner != self.ngx_worker_onwer:
+            fail_count += 1
             self.pretty_print('{0} should run under [user: {1}]'
                               .format(self.amp_ps_name, self.ngx_worker_onwer), 'error')
         else:
             self.pretty_print('Amplify agent is running under the same user as NGINX worker processes [user: {0}]'
                               .format(self.amp_owner))
 
+        return fail_count
+
     def verify_ngx_start_path(self):
+        fail_count = 0
         path_absolute_status = os.path.isabs(self.ps_path(self.ngx_pid))
 
         if not path_absolute_status:
+            fail_count += 1
             self.pretty_print('NGINX is not started with an absolute path.', 'error')
         else:
             self.pretty_print('NGINX is started with an absolute path')
 
+        return fail_count
+
     def verify_sys_ps_access(self):
+        fail_count = 0
         pid_list = self.check_ps_access()
 
         if int(self.ngx_pid) not in pid_list:
+            fail_count += 1
             self.pretty_print('The user ID [{0}] CANNOT run ps(1) to see all system processes'
                               .format(self.current_user()), 'error')
         else:
             self.pretty_print('The user ID [{0}] can run ps(1) to see all system processes'.format(self.current_user()))
 
+        return fail_count
+
     def verify_sys_time(self):
+        fail_count = 0
+
         try:
             client = ntplib.NTPClient()
             res = client.request('pool.ntp.org').tx_time
 
             current_ntp_time = datetime.utcfromtimestamp(res)
-            current_system_time = datetime.now()
+            current_system_time = self.datetime_now()
 
             diff = abs(current_ntp_time - current_system_time)
             diff_in_secs = diff.days * 24 * 60 * 60 + diff.seconds
 
             if diff_in_secs > self.max_time_diff_allowance:
+                fail_count += 1
                 self.pretty_print('The system time is NOT set correctly. The time difference is: {0} seconds'
                                   .format(diff_in_secs), 'error')
             else:
                 self.pretty_print('The system time is set correctly')
         except (ntplib.NTPException, socket.gaierror), exc:
+            fail_count += 1
             self.pretty_print('Cannot access NTP Server.', 'warn')
+
+        return fail_count
 
     def verify_ngx_stub_status(self):
         fail_count = 0
@@ -197,6 +238,8 @@ class AmplifyAgentHealthCheck(Base):
         if fail_count is 0 and not self.verbose:
             self.pretty_print('NGINX stub status is configured and activated')
 
+        return fail_count
+
     def verify_ngx_logs_read_access(self):
         fail_count = 0
         log_files = self.files(self.ngx_log_files)
@@ -215,6 +258,8 @@ class AmplifyAgentHealthCheck(Base):
         if fail_count is 0 and not self.verbose:
             self.pretty_print('NGINX log files are readable by user {0}'.format(self.ngx_worker_onwer))
 
+        return fail_count
+
     def verify_ngx_config_files_access(self):
         fail_count = 0
         conf_files = self.dir_tree(self.ngx_all_confs_path)
@@ -232,6 +277,8 @@ class AmplifyAgentHealthCheck(Base):
 
         if fail_count is 0 and not self.verbose:
             self.pretty_print('NGINX configuration files are readable by user {0}'.format(self.amp_owner))
+
+        return fail_count
 
     def verify_ngx_metrics(self, required_metrics):
         fail_count = 0
@@ -259,15 +306,22 @@ class AmplifyAgentHealthCheck(Base):
             self.pretty_print('NGINX additional metrics are applied on log_format directive in {0}'
                               .format(self.file_name(self.ngx_conf_file)))
 
+        return fail_count
+
     def verify_dns_resolver(self):
         "11. The system DNS resolver is correctly configured, and receiver.amplify.nginx.com can be successfully resolved."
 
     def verify_outbound_tls_access(self):
+        fail_count = 0
+
         try:
             requests.get('https://receiver.amplify.nginx.com')
             self.pretty_print('Oubound TLS/SSL from the system to receiver.amplify.nginx.com is not restricted')
         except requests.exceptions.ConnectionError, exc:
+            fail_count += 1
             self.pretty_print('Oubound TLS/SSL from the system to receiver.amplify.nginx.com IS restricted', 'error')
+
+        return fail_count
 
     def verify_metrics_collection(self):
         "13. selinux(8), apparmor(7) or grsecurity are not interfering with the metric collection. E.g. for selinux(8) check /etc/selinux/config, try setenforce 0 temporarily and see if it improves the situation for certain metrics."

@@ -21,7 +21,12 @@ setup(
         'pytest',
         'pytest-cov',
         'mock',
-        'numpy'
+        'numpy',
+
+        # Only their Exceptions
+        'setuptools',
+        'psutil',
+        'requests'
     ],
     zip_safe=False
 )

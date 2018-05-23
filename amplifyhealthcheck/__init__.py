@@ -4,7 +4,7 @@ __author__ = "Hirad Yazdanpanah"
 __license__ = "MIT"
 __maintainer__ = "Hirad Yazdanpanah"
 
-from amplifyhealthcheck.healthcheck import AmplifyAgentHealthCheck
+from healthcheck import AmplifyAgentHealthCheck
 
 amplify_agent_path = '/opt/nginx-amplify-agent'
 requirements_file = '/packages/nginx-amplify-agent/requirements'
@@ -46,4 +46,4 @@ def configure(**attrs):
 
         # System
         max_time_diff_allowance=attrs.get('max_time_diff_allowance', 80)
-    ).generate_output()
+    ).configure().generate_output()

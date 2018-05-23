@@ -1,0 +1,14 @@
+gevent==1.1.0
+lockfile==0.11.0
+netaddr==0.7.18
+netifaces==0.10.4
+psutil==4.0.0
+requests==2.12.4
+ujson==1.33
+python-daemon==2.0.6
+setproctitle==1.1.10
+rstr==2.2.3
+flup==1.0.2
+scandir==1.5
+crossplane==0.3.1
+PyMySQL==0.7.11
