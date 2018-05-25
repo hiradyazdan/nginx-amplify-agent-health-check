@@ -1,6 +1,6 @@
 machine:
   post:
-    - pyenv global 2.7.12
+    - pyenv global 2.7.10
 
 dependencies:
   override:
@@ -9,4 +9,4 @@ dependencies:
 test:
   override:
     - coverage run --source=amplifyhealthcheck setup.py test
-    - coveralls
+    - COVERALLS_REPO_TOKEN=$COVERALLS_REPO_TOKEN coveralls

@@ -17,7 +17,7 @@ setup(
     name='nginx-amplify-agent-health-check',
     version='0.1.2',
     description='Static and Dynamic Analysis for nginx-amplify-agent Health Status',
-    url='http://github.com/hiradyazdan/nginx-amplify-agent-health-check',
+    url='https://github.com/hiradyazdan/nginx-amplify-agent-health-check',
     author='Hirad Yazdanpanah',
     author_email='hirad.y@gmail.com',
     license='MIT',

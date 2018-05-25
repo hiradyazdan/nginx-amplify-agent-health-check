@@ -1,5 +1,6 @@
 import mock
 import pytest
+import subprocess
 
 from datetime import datetime
 from amplifyhealthcheck.healthcheck import AmplifyAgentHealthCheck
@@ -251,13 +252,16 @@ class HealthChckTestCase(TestCase):
     # @xfail
     # @pytest.mark.focus
     @mock.patch('os.path.isabs')
-    def test_verify_ngx_start_path(self, is_abs_mock):
+    @mock.patch('psutil.Process')
+    def test_verify_ngx_start_path(self, process_mock, is_abs_mock):
         is_abs_mock.return_value = True
+        process_mock.return_value.exe.return_value = 'some_absolute_path'
         fail_count = self.healthcheck.verify_ngx_start_path()
 
         assert fail_count == 0
 
         is_abs_mock.return_value = False
+        process_mock.return_value.exe.return_value = 'some_relative_path'
         fail_count = self.healthcheck.verify_ngx_start_path()
 
         assert fail_count > 0
@@ -301,12 +305,12 @@ class HealthChckTestCase(TestCase):
     # @xfail
     # @pytest.mark.focus
     @mock.patch('os.path.exists')
-    @mock.patch('subprocess.Popen.communicate')
-    def test_verify_ngx_stub_status(self, popen_comm_mock, path_exists_mock):
+    @mock.patch('amplifyhealthcheck.healthcheck.Popen')
+    def test_verify_ngx_stub_status(self, popen_mock, path_exists_mock):
         path_exists_mock.return_value = True
-        popen_comm_mock.return_value = (
+        popen_mock.return_value.communicate.return_value = (
             'http_dav_module\nhttp_ssl_module\nhttp_stub_status_module\nhttp_gzip_static_module\nhttp_v2_module',
-            'error'
+            ''
         )
 
         fail_count = self.healthcheck.verify_ngx_stub_status()
@@ -314,7 +318,17 @@ class HealthChckTestCase(TestCase):
         assert fail_count == 0
 
         path_exists_mock.return_value = False
-        popen_comm_mock.return_value = (
+        popen_mock.return_value.communicate.return_value = (
+            'http_dav_module\nhttp_ssl_module\nhttp_stub_status_module\nhttp_gzip_static_module\nhttp_v2_module',
+            ''
+        )
+        fail_count = self.healthcheck.verify_ngx_stub_status()
+
+        assert fail_count > 0
+
+        path_exists_mock.return_value = True
+
+        popen_mock.return_value.communicate.return_value = (
             'http_dav_module\nhttp_ssl_module\nhttp_gzip_static_module\nhttp_v2_module',
             'error'
         )
@@ -323,9 +337,9 @@ class HealthChckTestCase(TestCase):
         assert fail_count > 0
 
         path_exists_mock.return_value = True
-        popen_comm_mock.return_value = (
+        popen_mock.return_value.communicate.return_value = (
             'http_dav_module\nhttp_ssl_module\nhttp_stub_status_module\nhttp_gzip_static_module\nhttp_v2_module',
-            'error'
+            ''
         )
         self.teardown_method(None)
         self.healthcheck.ngx_conf_file = 'tests/fixtures/nginx_files/etc/nginx/nginx.conf.missing'
