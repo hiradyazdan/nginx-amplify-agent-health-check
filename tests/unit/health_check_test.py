@@ -14,25 +14,24 @@ from requests.exceptions import ConnectionError
 
 xfail = pytest.mark.xfail
 
+amplify_agent_path = 'tests/fixtures/agent_files/nginx-amplify-agent'
+amplify_conf_file = 'tests/fixtures/agent_files/etc/amplify-agent/agent.conf'
+amplify_log_file = 'tests/fixtures/agent_files/var/log/amplify-agent/agent.log'
+amplify_pid_file = 'tests/fixtures/agent_files/var/run/amplify-agent/amplify-agent.pid'
+
+nginx_all_confs_path = 'tests/fixtures/nginx_files/etc/nginx'
+nginx_conf_file = 'tests/fixtures/nginx_files/etc/nginx/nginx.conf'
+nginx_status_conf_file = 'tests/fixtures/nginx_files/etc/nginx/conf.d/stub_status.conf'
+nginx_mime_types_file = 'tests/fixtures/nginx_files/etc/nginx/mime.types'
+nginx_sites_available_conf_files = 'tests/fixtures/nginx_files/etc/nginx/sites-available/*.conf'
+nginx_sites_enabled_conf_files = 'tests/fixtures/nginx_files/etc/nginx/sites-enabled/*.conf'
+nginx_pid_file = 'tests/fixtures/nginx_files/var/run/nginx.pid'
+nginx_log_files = 'tests/fixtures/nginx_files/var/log/nginx/*.log'
+
 
 class HealthChckTestCase(TestCase):
-
     @classmethod
     def setup_class(cls):
-        amplify_agent_path = 'tests/fixtures/agent_files/nginx-amplify-agent'
-        amplify_conf_file = 'tests/fixtures/agent_files/etc/amplify-agent/agent.conf'
-        amplify_log_file = 'tests/fixtures/agent_files/var/log/amplify-agent/agent.log'
-        amplify_pid_file = 'tests/fixtures/agent_files/var/run/amplify-agent/amplify-agent.pid'
-
-        nginx_all_confs_path = 'tests/fixtures/nginx_files/etc/nginx'
-        nginx_conf_file = 'tests/fixtures/nginx_files/etc/nginx/nginx.conf'
-        nginx_status_conf_file = 'tests/fixtures/nginx_files/etc/nginx/conf.d/stub_status.conf'
-        nginx_mime_types_file = 'tests/fixtures/nginx_files/etc/nginx/mime.types'
-        nginx_sites_available_conf_files = 'tests/fixtures/nginx_files/etc/nginx/sites-available/*.conf'
-        nginx_sites_enabled_conf_files = 'tests/fixtures/nginx_files/etc/nginx/sites-enabled/*.conf'
-        nginx_pid_file = 'tests/fixtures/nginx_files/var/run/nginx.pid'
-        nginx_log_files = 'tests/fixtures/nginx_files/var/log/nginx/*.log'
-
         cls.healthcheck = AmplifyAgentHealthCheck(
             verbose=True,
             decorate_mode=True,
@@ -75,7 +74,8 @@ class HealthChckTestCase(TestCase):
         self.healthcheck.configure()
 
     def teardown_method(self, method):
-        pass
+        self.healthcheck.ngx_conf_file = nginx_conf_file
+        self.healthcheck.ngx_conf_blocks = []
 
     # @xfail
     # @pytest.mark.focus
@@ -236,6 +236,20 @@ class HealthChckTestCase(TestCase):
 
     # @xfail
     # @pytest.mark.focus
+    @mock.patch('psutil.Process')
+    def test_verify_ngx_start_process(self, process_mock):
+        process_mock.return_value.ppid.return_value = 1
+        fail_count = self.healthcheck.verify_ngx_start_process()
+
+        assert fail_count == 0
+
+        process_mock.return_value.ppid.return_value = 87
+        fail_count = self.healthcheck.verify_ngx_start_process()
+
+        assert fail_count > 0
+
+    # @xfail
+    # @pytest.mark.focus
     @mock.patch('os.path.isabs')
     def test_verify_ngx_start_path(self, is_abs_mock):
         is_abs_mock.return_value = True
@@ -294,6 +308,7 @@ class HealthChckTestCase(TestCase):
             'http_dav_module\nhttp_ssl_module\nhttp_stub_status_module\nhttp_gzip_static_module\nhttp_v2_module',
             'error'
         )
+
         fail_count = self.healthcheck.verify_ngx_stub_status()
 
         assert fail_count == 0
@@ -303,6 +318,18 @@ class HealthChckTestCase(TestCase):
             'http_dav_module\nhttp_ssl_module\nhttp_gzip_static_module\nhttp_v2_module',
             'error'
         )
+        fail_count = self.healthcheck.verify_ngx_stub_status()
+
+        assert fail_count > 0
+
+        path_exists_mock.return_value = True
+        popen_comm_mock.return_value = (
+            'http_dav_module\nhttp_ssl_module\nhttp_stub_status_module\nhttp_gzip_static_module\nhttp_v2_module',
+            'error'
+        )
+        self.teardown_method(None)
+        self.healthcheck.ngx_conf_file = 'tests/fixtures/nginx_files/etc/nginx/nginx.conf.missing'
+        self.setup_method(None)
         fail_count = self.healthcheck.verify_ngx_stub_status()
 
         assert fail_count > 0
@@ -354,10 +381,13 @@ class HealthChckTestCase(TestCase):
 
         assert fail_count == 0
 
-        self.healthcheck.ngx_conf_file = 'tests/fixtures/nginx_files/etc/nginx/nginx.conf.missing_metrics'
+        self.teardown_method(None)
+        self.healthcheck.ngx_conf_file = 'tests/fixtures/nginx_files/etc/nginx/nginx.conf.missing'
+        self.setup_method(None)
+
         fail_count = self.healthcheck.verify_ngx_metrics(required_metrics)
 
-        assert fail_count > 0
+        assert fail_count == 2
 
     @xfail
     # @pytest.mark.focus

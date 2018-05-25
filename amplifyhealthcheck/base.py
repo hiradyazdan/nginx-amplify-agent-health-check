@@ -62,6 +62,9 @@ class Base(object):
     def pid(self, name):
         return check_output(['pidof', name]).split(' ')
 
+    def parent_pid(self, pid):
+        return psutil.Process(int(pid)).ppid()
+
     def all_pids(self):
         return psutil.pids()
 
@@ -119,7 +122,7 @@ class Base(object):
 
     def pretty_print(self, message, message_type=''):
         if type(message) is list:
-            message = ' '.join(message)
+            message = ' '.join([str(item) for item in message])
 
         if message_type is 'error':
             self.mark = self.red_color + self.crossmark.encode('utf-8')

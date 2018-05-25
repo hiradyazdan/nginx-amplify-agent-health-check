@@ -1,5 +1,18 @@
 from setuptools import setup
 
+test_requirements = [
+    'pytest',
+    'pytest-cov',
+    'coveralls',
+    'mock',
+    'numpy',
+
+    # Only their Exceptions
+    'setuptools',
+    'psutil',
+    'requests'
+]
+
 setup(
     name='nginx-amplify-agent-health-check',
     version='0.1.2',
@@ -17,16 +30,9 @@ setup(
         'requests'
     ],
     setup_requires=['pytest-runner'],
-    tests_require=[
-        'pytest',
-        'pytest-cov',
-        'mock',
-        'numpy',
-
-        # Only their Exceptions
-        'setuptools',
-        'psutil',
-        'requests'
-    ],
+    tests_require=test_requirements,
+    extras_require={
+        'test': test_requirements,
+    },
     zip_safe=False
 )

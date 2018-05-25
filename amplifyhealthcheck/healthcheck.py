@@ -23,11 +23,18 @@ class AmplifyAgentHealthCheck(Base):
         self.decorate_mode = attrs['decorate_mode']
         self.heading = attrs['heading']
 
+        # System
+        self.max_time_diff_allowance = attrs['max_time_diff_allowance']
+
         # Amplify
         self.amp_agent_path = attrs['amplify_agent_path']
         self.amp_conf_file = attrs['amplify_conf_file']
         self.amp_log_file = attrs['amplify_log_file']
         self.amp_pid_file = attrs['amplify_pid_file']
+
+        self.amp_pid = None
+        self.amp_owner = None
+        self.amp_ps_name = None
 
         # Nginx
         self.ngx_all_confs_path = attrs['nginx_all_confs_path']
@@ -39,12 +46,8 @@ class AmplifyAgentHealthCheck(Base):
         self.ngx_log_files = attrs['nginx_log_files']
         self.ngx_pid_file = attrs['nginx_pid_file']
 
-        # System
-        self.max_time_diff_allowance = attrs['max_time_diff_allowance']
-
-        self.amp_pid = None
-        self.amp_owner = None
-        self.amp_ps_name = None
+        self.ngx_conf = None
+        self.ngx_conf_blocks = []
         self.ngx_pid = None
         self.ngx_owner = None
         self.ngx_worker_pid = None
@@ -54,10 +57,17 @@ class AmplifyAgentHealthCheck(Base):
         self.amp_pid = self.read_file(self.amp_pid_file)[0]
         self.amp_owner = self.ps_owner(self.amp_pid)
         self.amp_ps_name = self.ps_name(self.amp_pid)
+
+        self.ngx_conf = crossplane.parse(self.ngx_conf_file)
         self.ngx_pid = self.read_file(self.ngx_pid_file)[0]
         self.ngx_owner = self.ps_owner(self.ngx_pid)
         self.ngx_worker_pid = self.pid('nginx: worker process')[0]
         self.ngx_worker_onwer = self.ps_owner(self.ngx_worker_pid)
+
+        for config in self.ngx_conf['config']:
+            for parsed in config.get('parsed', []):
+                for block in parsed.get('block', []):
+                    self.ngx_conf_blocks.append(block)
 
         return self
 
@@ -158,6 +168,18 @@ class AmplifyAgentHealthCheck(Base):
 
         return fail_count
 
+    def verify_ngx_start_process(self):
+        fail_count = 0
+        ngx_ppid = self.parent_pid(self.ngx_pid)
+
+        if ngx_ppid != 1:
+            fail_count += 1
+            self.pretty_print('NGINX should start as a foreground system process', 'error')
+        else:
+            self.pretty_print('NGINX started as a foreground system process')
+
+        return fail_count
+
     def verify_ngx_start_path(self):
         fail_count = 0
         path_absolute_status = os.path.isabs(self.ps_path(self.ngx_pid))
@@ -213,6 +235,7 @@ class AmplifyAgentHealthCheck(Base):
 
         stub_status_file = self.check_file(self.ngx_status_conf_file)
         stub_status_filename = self.file_name(self.ngx_status_conf_file)
+        ngx_conf_filename = self.file_name(self.ngx_conf_file)
         stub_status_module = 'http_stub_status_module'
 
         nginx_version = Popen(['nginx', '-V'], stderr=PIPE)  # No idea why nginx -V redirects output to stderr
@@ -223,20 +246,34 @@ class AmplifyAgentHealthCheck(Base):
 
         nginx_modules = sub('\s+', ',', output.strip()).split(',')
 
+        included_configs = []
+
+        for block in self.ngx_conf_blocks:
+            if block['directive'] == 'include':
+                for arg in block['args']:
+                    included_configs.append(arg.split('*')[0])
+
         if not stub_status_file:
             fail_count += 1
-            self.pretty_print('{0} does not exist'.format(stub_status_filename), 'error')
+            self.pretty_print('NGINX {0} does not exist'.format(stub_status_filename), 'error')
         elif self.verbose:
-            self.pretty_print('{0} is configured'.format(stub_status_filename))
+            self.pretty_print('NGINX {0} is configured'.format(stub_status_filename))
+
+        if self.ngx_status_conf_file.split(stub_status_filename)[0] not in included_configs:
+            fail_count += 1
+            self.pretty_print('NGINX {0} is NOT included in {1} file'
+                              .format(stub_status_filename, ngx_conf_filename, 'error'))
+        elif self.verbose:
+            self.pretty_print('NGINX {0} is included in {1} file'.format(stub_status_filename, ngx_conf_filename))
 
         if stub_status_module not in nginx_modules:
             fail_count += 1
-            self.pretty_print('{0} is NOT included in the NGINX build'.format(stub_status_module), 'error')
+            self.pretty_print('NGINX {0} is NOT included in the NGINX build'.format(stub_status_module), 'error')
         elif self.verbose:
-            self.pretty_print('{0} is included in the NGINX build'.format(stub_status_module))
+            self.pretty_print('NGINX {0} is included in the NGINX build'.format(stub_status_module))
 
         if fail_count is 0 and not self.verbose:
-            self.pretty_print('NGINX stub status is configured and activated')
+            self.pretty_print('NGINX stub_status is configured and activated')
 
         return fail_count
 
@@ -282,16 +319,13 @@ class AmplifyAgentHealthCheck(Base):
 
     def verify_ngx_metrics(self, required_metrics):
         fail_count = 0
-        conf = crossplane.parse(self.ngx_conf_file)
         current_metrics = []
 
-        for config in conf['config']:
-            for parsed in config.get('parsed', []):
-                for block in parsed.get('block', []):
-                    if block['directive'] == 'log_format':
-                        for args in block['args']:
-                            for arg in args.split(' '):
-                                current_metrics.append(arg.strip())
+        for block in self.ngx_conf_blocks:
+            if block['directive'] == 'log_format':
+                for args in block['args']:
+                    for arg in args.split(' '):
+                        current_metrics.append(arg.strip())
 
         for metrics_arg in required_metrics:
             if metrics_arg not in current_metrics:
@@ -315,11 +349,16 @@ class AmplifyAgentHealthCheck(Base):
         fail_count = 0
 
         try:
-            requests.get('https://receiver.amplify.nginx.com')
+            res = requests.get('https://receiver.amplify.nginx.com:443/ping')
+            res.raise_for_status()
+
             self.pretty_print('Oubound TLS/SSL from the system to receiver.amplify.nginx.com is not restricted')
-        except requests.exceptions.ConnectionError, exc:
+        except requests.exceptions.RequestException, exc:
             fail_count += 1
-            self.pretty_print('Oubound TLS/SSL from the system to receiver.amplify.nginx.com IS restricted', 'error')
+            self.pretty_print(
+                ['Oubound TLS/SSL from the system to receiver.amplify.nginx.com IS restricted', exc],
+                'error'
+            )
 
         return fail_count
 
