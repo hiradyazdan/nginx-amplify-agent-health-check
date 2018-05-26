@@ -15,7 +15,7 @@ test_requirements = [
 
 setup(
     name='nginx-amplify-agent-health-check',
-    version='0.1.2',
+    version='0.1.3',
     description='Static and Dynamic Analysis for nginx-amplify-agent Health Status',
     url='https://github.com/hiradyazdan/nginx-amplify-agent-health-check',
     author='Hirad Yazdanpanah',
