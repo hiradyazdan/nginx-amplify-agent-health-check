@@ -24,10 +24,13 @@ class AmplifyAgentHealthCheck(Base):
         self.heading = attrs['heading']
 
         # System
-        self.max_time_diff_allowance = attrs['max_time_diff_allowance']
+        self.sys_pkgs = attrs['system_packages']
+        self.sys_find_pkg_cmd = attrs['system_find_package_command']
+        self.sys_time_diff_max_allowance = attrs['system_time_diff_max_allowance']
 
         # Amplify
         self.amp_agent_path = attrs['amplify_agent_path']
+        self.amp_reqs_file = attrs['amplify_reqs_file']
         self.amp_conf_file = attrs['amplify_conf_file']
         self.amp_log_file = attrs['amplify_log_file']
         self.amp_pid_file = attrs['amplify_pid_file']
@@ -45,6 +48,7 @@ class AmplifyAgentHealthCheck(Base):
         self.ngx_mime_types_file = attrs['nginx_mime_types_file']
         self.ngx_log_files = attrs['nginx_log_files']
         self.ngx_pid_file = attrs['nginx_pid_file']
+        self.ngx_additional_metrics = attrs['nginx_additional_metrics']
 
         self.ngx_conf = None
         self.ngx_conf_blocks = []
@@ -54,20 +58,23 @@ class AmplifyAgentHealthCheck(Base):
         self.ngx_worker_onwer = None
 
     def configure(self):
-        self.amp_pid = self.read_file(self.amp_pid_file)[0]
-        self.amp_owner = self.ps_owner(self.amp_pid)
-        self.amp_ps_name = self.ps_name(self.amp_pid)
+        try:
+            self.amp_pid = self.read_file(self.amp_pid_file)[0]
+            self.amp_owner = self.ps_owner(self.amp_pid)
+            self.amp_ps_name = self.ps_name(self.amp_pid)
 
-        self.ngx_conf = crossplane.parse(self.ngx_conf_file)
-        self.ngx_pid = self.read_file(self.ngx_pid_file)[0]
-        self.ngx_owner = self.ps_owner(self.ngx_pid)
-        self.ngx_worker_pid = self.pid('nginx: worker process')[0]
-        self.ngx_worker_onwer = self.ps_owner(self.ngx_worker_pid)
+            self.ngx_pid = self.read_file(self.ngx_pid_file)[0]
+            self.ngx_owner = self.ps_owner(self.ngx_pid)
+            self.ngx_worker_pid = self.pid('nginx: worker process')[0]
+            self.ngx_worker_onwer = self.ps_owner(self.ngx_worker_pid)
+            self.ngx_conf = crossplane.parse(self.ngx_conf_file)
 
-        for config in self.ngx_conf['config']:
-            for parsed in config.get('parsed', []):
-                for block in parsed.get('block', []):
-                    self.ngx_conf_blocks.append(block)
+            for config in self.ngx_conf['config']:
+                for parsed in config.get('parsed', []):
+                    for block in parsed.get('block', []):
+                        self.ngx_conf_blocks.append(block)
+        except IOError, exc:
+            pass
 
         return self
 
@@ -78,22 +85,39 @@ class AmplifyAgentHealthCheck(Base):
 
         return self
 
-    def verify_sys_pkgs(self, packages, find_sys_pkg_cmd, fail_count):
-        for pkg in packages:
+    def verify_sys_pkgs(self, fail_count=0):
+        fail_count += fail_count
+
+        for pkg in self.sys_pkgs:
             try:
-                status = call(find_sys_pkg_cmd + [pkg], stdout=devnull, stderr=devnull)
+                status = call(self.sys_find_pkg_cmd + [pkg], stdout=devnull, stderr=devnull)
 
                 if status != 0:
-                    raise ValueError('{0} package {1} was NOT found'.format(find_sys_pkg_cmd[0], pkg))
+                    raise ValueError('{0} package {1} was NOT found'.format(self.sys_find_pkg_cmd[0], pkg))
                 elif self.verbose:
-                    self.pretty_print('{0} package {1} was found'.format(find_sys_pkg_cmd[0], pkg))
+                    self.pretty_print('{0} package {1} was found'.format(self.sys_find_pkg_cmd[0], pkg))
+            except OSError, exc:
+                fail_count += 1
+                self.pretty_print('System {} package manager is not installed'
+                                  .format(self.sys_find_pkg_cmd[0]), 'error')
+                break
             except ValueError, exc:
                 fail_count += 1
                 self.pretty_print(exc, 'error')
 
         return fail_count
 
-    def verify_py_pkgs(self, packages, fail_count):
+    def verify_py_pkgs(self, fail_count=0):
+        fail_count += fail_count
+        pkg_path = '{}{}'.format(self.amp_agent_path, self.amp_reqs_file)
+        packages = []
+
+        if not self.check_file(pkg_path):
+            fail_count += 1
+            self.pretty_print('Amplify agent requirements file was not found', 'error')
+        else:
+            packages = filter(None, self.read_file(pkg_path))
+
         rgx = '[^a-zA-Z0-9.]'
 
         for pkg in packages:
@@ -113,13 +137,11 @@ class AmplifyAgentHealthCheck(Base):
 
         return fail_count
 
-    def verify_all_packages(self, packages, requirements_file, find_sys_pkg_cmd):
+    def verify_all_packages(self):
         fail_count = 0
-        deps_path = '{}{}'.format(self.amp_agent_path, requirements_file)
-        required_deps = filter(None, self.read_file(deps_path))
 
-        fail_count = self.verify_sys_pkgs(packages, find_sys_pkg_cmd, fail_count)
-        fail_count = self.verify_py_pkgs(required_deps, fail_count)
+        fail_count = self.verify_sys_pkgs(fail_count)
+        fail_count = self.verify_py_pkgs(fail_count)
 
         if fail_count is 0 and not self.verbose:
             self.pretty_print('All system and python packages are installed')
@@ -128,9 +150,8 @@ class AmplifyAgentHealthCheck(Base):
 
     def verify_agent_ps(self):
         fail_count = 0
-        pid_file = self.check_file(self.amp_pid_file)
 
-        if pid_file:
+        if self.amp_pid is not None:
             self.pretty_print('Amplify agent is running...')
         else:
             fail_count += 1
@@ -140,25 +161,28 @@ class AmplifyAgentHealthCheck(Base):
 
     def verify_agent_log(self):
         fail_count = 0
-        log_file = self.check_file(self.amp_log_file)
-        logs = self.read_file(self.amp_log_file)
 
-        if log_file and len(logs) > 0:
-            self.pretty_print('Amplify {0} file exists and is being updated'.format(self.file_name(self.amp_log_file)))
-        elif not log_file:
-            fail_count += 1
-            self.pretty_print('Amplify {0} file does NOT exist'.format(self.file_name(self.amp_log_file)), 'error')
+        if self.check_file(self.amp_log_file):
+            logs = self.read_file(self.amp_log_file)
+
+            if len(logs) > 0:
+                self.pretty_print('Amplify agent {0} file exists and is being updated'.format(self.file_name(self.amp_log_file)))
+            else:
+                fail_count += 1
+                self.pretty_print('Amplify agent {0} file is NOT being updated'.format(self.file_name(self.amp_log_file)))
         else:
             fail_count += 1
-            self.pretty_print('Amplify {0} file is NOT being updated'
-                              .format(self.file_name(self.amp_log_file)), 'error')
+            self.pretty_print('Amplify agent {0} file does NOT exist'.format(self.file_name(self.amp_log_file)), 'error')
 
         return fail_count
 
     def verify_agent_user(self):
         fail_count = 0
 
-        if self.amp_owner != self.ngx_worker_onwer:
+        if self.amp_owner is None:
+            fail_count += 1
+            self.pretty_print('Amplify agent user was not detected', 'error')
+        elif self.amp_owner != self.ngx_worker_onwer:
             fail_count += 1
             self.pretty_print('{0} should run under [user: {1}]'
                               .format(self.amp_ps_name, self.ngx_worker_onwer), 'error')
@@ -168,27 +192,27 @@ class AmplifyAgentHealthCheck(Base):
 
         return fail_count
 
-    def verify_ngx_start_process(self):
+    def verify_ngx_master_ps(self):
         fail_count = 0
-        ngx_ppid = self.parent_pid(self.ngx_pid)
 
-        if ngx_ppid != 1:
+        if self.ngx_pid is None:
             fail_count += 1
-            self.pretty_print('NGINX should start as a foreground system process', 'error')
+            self.pretty_print('NGINX is NOT running...', 'error')
         else:
-            self.pretty_print('NGINX started as a foreground system process')
+            ngx_ppid = self.parent_pid(self.ngx_pid)
+            path_absolute_status = os.path.isabs(self.ps_path(self.ngx_pid))
 
-        return fail_count
+            if ngx_ppid != 1:
+                fail_count += 1
+                self.pretty_print('NGINX should start as a foreground system process', 'error')
+            else:
+                self.pretty_print('NGINX started as a foreground system process')
 
-    def verify_ngx_start_path(self):
-        fail_count = 0
-        path_absolute_status = os.path.isabs(self.ps_path(self.ngx_pid))
-
-        if not path_absolute_status:
-            fail_count += 1
-            self.pretty_print('NGINX is not started with an absolute path.', 'error')
-        else:
-            self.pretty_print('NGINX is started with an absolute path')
+            if not path_absolute_status:
+                fail_count += 1
+                self.pretty_print('NGINX is not started with an absolute path.', 'error')
+            else:
+                self.pretty_print('NGINX is started with an absolute path')
 
         return fail_count
 
@@ -196,12 +220,12 @@ class AmplifyAgentHealthCheck(Base):
         fail_count = 0
         pid_list = self.check_ps_access()
 
-        if int(self.ngx_pid) not in pid_list:
+        if self.ngx_pid is not None and int(self.ngx_pid) not in pid_list:
             fail_count += 1
-            self.pretty_print('The user ID [{0}] CANNOT run ps(1) to see all system processes'
+            self.pretty_print('System user ID [{0}] CANNOT run ps(1) to see all system processes'
                               .format(self.current_user()), 'error')
         else:
-            self.pretty_print('The user ID [{0}] can run ps(1) to see all system processes'.format(self.current_user()))
+            self.pretty_print('System user ID [{0}] can run ps(1) to see all system processes'.format(self.current_user()))
 
         return fail_count
 
@@ -215,15 +239,18 @@ class AmplifyAgentHealthCheck(Base):
             current_ntp_time = datetime.utcfromtimestamp(res)
             current_system_time = self.datetime_now()
 
+            print(current_ntp_time)
+            print(current_system_time)
+
             diff = abs(current_ntp_time - current_system_time)
             diff_in_secs = diff.days * 24 * 60 * 60 + diff.seconds
 
-            if diff_in_secs > self.max_time_diff_allowance:
+            if diff_in_secs > self.sys_time_diff_max_allowance:
                 fail_count += 1
-                self.pretty_print('The system time is NOT set correctly. The time difference is: {0} seconds'
+                self.pretty_print('System time is NOT set correctly. The time difference is: {0} seconds'
                                   .format(diff_in_secs), 'error')
             else:
-                self.pretty_print('The system time is set correctly')
+                self.pretty_print('System time is set correctly')
         except (ntplib.NTPException, socket.gaierror), exc:
             fail_count += 1
             self.pretty_print('Cannot access NTP Server.', 'warn')
@@ -262,7 +289,7 @@ class AmplifyAgentHealthCheck(Base):
         if self.ngx_status_conf_file.split(stub_status_filename)[0] not in included_configs:
             fail_count += 1
             self.pretty_print('NGINX {0} is NOT included in {1} file'
-                              .format(stub_status_filename, ngx_conf_filename, 'error'))
+                              .format(stub_status_filename, ngx_conf_filename), 'error')
         elif self.verbose:
             self.pretty_print('NGINX {0} is included in {1} file'.format(stub_status_filename, ngx_conf_filename))
 
@@ -281,16 +308,20 @@ class AmplifyAgentHealthCheck(Base):
         fail_count = 0
         log_files = self.files(self.ngx_log_files)
 
-        for log_file in log_files:
-            if self.file_owner(log_file) != self.ngx_worker_onwer or \
-                    self.file_group(log_file) != self.ngx_owner or \
-                    not self.check_file_read_perms(log_file):
-                fail_count += 1
-                self.pretty_print('NGINX {0} file is NOT readable by user {1}'
-                                  .format(self.file_name(log_file), self.ngx_worker_onwer), 'error')
-            elif self.verbose:
-                self.pretty_print('NGINX {0} file is readable by user {1}'
-                                  .format(self.file_name(log_file), self.ngx_worker_onwer))
+        if len(log_files) > 0:
+            for log_file in log_files:
+                if self.file_owner(log_file) != self.ngx_worker_onwer or \
+                        self.file_group(log_file) != self.ngx_owner or \
+                        not self.check_file_read_perms(log_file):
+                    fail_count += 1
+                    self.pretty_print('NGINX {0} file is NOT readable by user {1}'
+                                      .format(self.file_name(log_file), self.ngx_worker_onwer), 'error')
+                elif self.verbose:
+                    self.pretty_print('NGINX {0} file is readable by user {1}'
+                                      .format(self.file_name(log_file), self.ngx_worker_onwer))
+        else:
+            fail_count += 1
+            self.pretty_print('NGINX log files were not found', 'error')
 
         if fail_count is 0 and not self.verbose:
             self.pretty_print('NGINX log files are readable by user {0}'.format(self.ngx_worker_onwer))
@@ -301,23 +332,27 @@ class AmplifyAgentHealthCheck(Base):
         fail_count = 0
         conf_files = self.dir_tree(self.ngx_all_confs_path)
 
-        for conf_file in conf_files:
-            if self.file_owner(conf_file) != self.amp_owner and \
-                    self.file_group(conf_file) != self.amp_owner and \
-                    not self.check_file_read_perms(conf_file):
-                fail_count += 1
-                self.pretty_print('NGINX {0} file is NOT readable by user {1}'
-                                  .format(self.file_name(conf_file), self.amp_owner), 'error')
-            elif self.verbose:
-                self.pretty_print('NGINX {0} file is readable by user {1}'
-                                  .format(self.file_name(conf_file), self.amp_owner))
+        if len(conf_files) > 0:
+            for conf_file in conf_files:
+                if self.file_owner(conf_file) != self.amp_owner and \
+                        self.file_group(conf_file) != self.amp_owner and \
+                        not self.check_file_read_perms(conf_file):
+                    fail_count += 1
+                    self.pretty_print('NGINX {0} file is NOT readable by user {1}'
+                                      .format(self.file_name(conf_file), self.amp_owner), 'error')
+                elif self.verbose:
+                    self.pretty_print('NGINX {0} file is readable by user {1}'
+                                      .format(self.file_name(conf_file), self.amp_owner))
+        else:
+            fail_count += 1
+            self.pretty_print('NGINX configuration files were not found', 'error')
 
         if fail_count is 0 and not self.verbose:
             self.pretty_print('NGINX configuration files are readable by user {0}'.format(self.amp_owner))
 
         return fail_count
 
-    def verify_ngx_metrics(self, required_metrics):
+    def verify_ngx_metrics(self):
         fail_count = 0
         current_metrics = []
 
@@ -327,14 +362,18 @@ class AmplifyAgentHealthCheck(Base):
                     for arg in args.split(' '):
                         current_metrics.append(arg.strip())
 
-        for metrics_arg in required_metrics:
-            if metrics_arg not in current_metrics:
-                fail_count += 1
-                self.pretty_print('NGINX [{0}] metrics argument is NOT applied on log_format directive in {1}'
-                                  .format(metrics_arg, self.file_name(self.ngx_conf_file)), 'error')
-            elif self.verbose:
-                self.pretty_print('NGINX [{0}] metrics argument is applied on log_format directive in {1}'
-                                  .format(metrics_arg, self.file_name(self.ngx_conf_file)))
+        if len(current_metrics) > 0:
+            for metrics_arg in self.ngx_additional_metrics:
+                if metrics_arg not in current_metrics:
+                    fail_count += 1
+                    self.pretty_print('NGINX [{0}] metrics argument is NOT applied on log_format directive in {1}'
+                                      .format(metrics_arg, self.file_name(self.ngx_conf_file)), 'error')
+                elif self.verbose:
+                    self.pretty_print('NGINX [{0}] metrics argument is applied on log_format directive in {1}'
+                                      .format(metrics_arg, self.file_name(self.ngx_conf_file)))
+        else:
+            fail_count += 1
+            self.pretty_print('NGINX additional metrics are NOT applied on log_format directive in nginx.conf', 'error')
 
         if fail_count is 0 and not self.verbose:
             self.pretty_print('NGINX additional metrics are applied on log_format directive in {0}'
@@ -352,11 +391,11 @@ class AmplifyAgentHealthCheck(Base):
             res = requests.get('https://receiver.amplify.nginx.com:443/ping')
             res.raise_for_status()
 
-            self.pretty_print('Oubound TLS/SSL from the system to receiver.amplify.nginx.com is not restricted')
+            self.pretty_print('Outbound TLS/SSL from the system to receiver.amplify.nginx.com is accessible')
         except requests.exceptions.RequestException, exc:
             fail_count += 1
             self.pretty_print(
-                ['Oubound TLS/SSL from the system to receiver.amplify.nginx.com IS restricted', exc],
+                ['Outbound TLS/SSL from the system to receiver.amplify.nginx.com IS restricted', exc],
                 'error'
             )
 
@@ -367,4 +406,3 @@ class AmplifyAgentHealthCheck(Base):
 
     def verify_proc_sys_access(self):
         "14. Some VPS providers use hardened Linux kernels that may restrict non-root users from accessing /proc and /sys. Metrics describing system and NGINX disk I/O are usually affected. There is no an easy workaround for this except for allowing the agent to run as root. Sometimes fixing permissions for /proc and /sys/block may work."
-        self.amp_owner

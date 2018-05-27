@@ -7,7 +7,7 @@ __maintainer__ = "Hirad Yazdanpanah"
 from healthcheck import AmplifyAgentHealthCheck
 
 
-def configure(**attrs):
+def main(**attrs):
     amplify_agent_path = '/opt/nginx-amplify-agent'
     amplify_reqs_file = '/packages/nginx-amplify-agent/requirements'
     amplify_conf_file = '/etc/amplify-agent/agent.conf'
@@ -70,4 +70,15 @@ def configure(**attrs):
         system_time_diff_max_allowance=attrs.get('system_time_diff_max_allowance', 80)
     ).configure().generate_output()
 
-    return amphc
+    print amphc
+
+    public_methods = [
+        method for method in dir(amphc)
+        if callable(getattr(amphc, method))
+        and method.startswith('verify_')
+        and not method.startswith('_')
+        and not method.startswith('verify_all_')
+    ]
+
+    for method in public_methods:
+        getattr(amphc, method)()

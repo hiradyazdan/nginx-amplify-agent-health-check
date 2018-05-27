@@ -2,5 +2,5 @@
 
 
 __author__ = "Hirad Yazdanpanah"
-__license__ = ""
+__license__ = "MIT"
 __maintainer__ = "Hirad Yazdanpanah"

@@ -1,8 +1,7 @@
 import mock
 import pytest
-import subprocess
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from amplifyhealthcheck.healthcheck import AmplifyAgentHealthCheck
 from unittest import TestCase
 
@@ -16,6 +15,7 @@ from requests.exceptions import ConnectionError
 xfail = pytest.mark.xfail
 
 amplify_agent_path = 'tests/fixtures/agent_files/nginx-amplify-agent'
+amplify_reqs_file = '/requirements'
 amplify_conf_file = 'tests/fixtures/agent_files/etc/amplify-agent/agent.conf'
 amplify_log_file = 'tests/fixtures/agent_files/var/log/amplify-agent/agent.log'
 amplify_pid_file = 'tests/fixtures/agent_files/var/run/amplify-agent/amplify-agent.pid'
@@ -28,6 +28,24 @@ nginx_sites_available_conf_files = 'tests/fixtures/nginx_files/etc/nginx/sites-a
 nginx_sites_enabled_conf_files = 'tests/fixtures/nginx_files/etc/nginx/sites-enabled/*.conf'
 nginx_pid_file = 'tests/fixtures/nginx_files/var/run/nginx.pid'
 nginx_log_files = 'tests/fixtures/nginx_files/var/log/nginx/*.log'
+nginx_additional_metrics = [
+    'sn="$server_name"',
+    'rt=$request_time',
+    'ua="$upstream_addr"',
+    'us="$upstream_status"',
+    'ut="$upstream_response_time"',
+    'ul="$upstream_response_length"',
+    'cs=$upstream_cache_status'
+]
+
+system_packages = [
+    'python', 'python-dev',
+    'git',
+    'util-linux', 'procps',
+    'curl',  # 'wget',
+    'gcc', 'musl-dev', 'linux-headers'
+]
+system_find_package_command = ['apk', 'info']
 
 
 class HealthChckTestCase(TestCase):
@@ -40,6 +58,7 @@ class HealthChckTestCase(TestCase):
 
             # Amplify
             amplify_agent_path=amplify_agent_path,
+            amplify_reqs_file=amplify_reqs_file,
             amplify_conf_file=amplify_conf_file,
             amplify_log_file=amplify_log_file,
             amplify_pid_file=amplify_pid_file,
@@ -53,9 +72,12 @@ class HealthChckTestCase(TestCase):
             nginx_mime_types_file=nginx_mime_types_file,
             nginx_log_files=nginx_log_files,
             nginx_pid_file=nginx_pid_file,
+            nginx_additional_metrics=nginx_additional_metrics,
 
             # System
-            max_time_diff_allowance=80
+            system_packages=system_packages,
+            system_find_package_command=system_find_package_command,
+            system_time_diff_max_allowance=80
         )
 
     @classmethod
@@ -75,30 +97,29 @@ class HealthChckTestCase(TestCase):
         self.healthcheck.configure()
 
     def teardown_method(self, method):
+        self.healthcheck.verbose = True
+        self.healthcheck.ngx_all_confs_path = nginx_all_confs_path
         self.healthcheck.ngx_conf_file = nginx_conf_file
+        self.healthcheck.ngx_log_files = nginx_log_files
         self.healthcheck.ngx_conf_blocks = []
 
     # @xfail
     # @pytest.mark.focus
     @mock.patch('subprocess.Popen')
     def test_verify_sys_pkgs(self, popen_mock):
-        packages = [
-            'python', 'python-dev',
-            'git',
-            'util-linux', 'procps',
-            'curl',  # 'wget',
-            'gcc', 'musl-dev', 'linux-headers'
-        ]
-
-        find_sys_pkg_cmd = ['apk', 'info']
-
         popen_mock.return_value.wait.return_value = 0
-        fail_count = self.healthcheck.verify_sys_pkgs(packages, find_sys_pkg_cmd, 0)
+        fail_count = self.healthcheck.verify_sys_pkgs()
 
         assert fail_count == 0
 
+        popen_mock.side_effect = OSError(Exception, 'No such file or directory')
+        fail_count = self.healthcheck.verify_sys_pkgs()
+
+        assert fail_count > 0
+
+        popen_mock.side_effect = None
         popen_mock.return_value.wait.return_value = 1
-        fail_count = self.healthcheck.verify_sys_pkgs(packages, find_sys_pkg_cmd, 0)
+        fail_count = self.healthcheck.verify_sys_pkgs()
 
         assert fail_count > 0
 
@@ -107,11 +128,6 @@ class HealthChckTestCase(TestCase):
     @mock.patch('pkg_resources.find_distributions')
     @mock.patch('pkg_resources.require')
     def test_verify_py_pkgs(self, require_mock, find_dist_mock):
-        packages = filter(
-            None,
-            self.healthcheck.read_file('tests/fixtures/agent_files/nginx-amplify-agent/requirements')
-        )
-
         find_dist_mock.return_value = [
             'gevent==1.1.0',
             'lockfile==0.11.0',
@@ -128,7 +144,7 @@ class HealthChckTestCase(TestCase):
             'crossplane==0.3.1',
             'PyMySQL==0.7.11'
         ]
-        fail_count = self.healthcheck.verify_py_pkgs(packages, 0)
+        fail_count = self.healthcheck.verify_py_pkgs()
 
         assert fail_count == 0
 
@@ -142,7 +158,7 @@ class HealthChckTestCase(TestCase):
             'ujson==1.33'
         ]
         require_mock.side_effect = DistributionNotFound(Exception, 'distribution not found')
-        fail_count = self.healthcheck.verify_py_pkgs(packages, 0)
+        fail_count = self.healthcheck.verify_py_pkgs()
 
         assert fail_count > 0
 
@@ -150,17 +166,9 @@ class HealthChckTestCase(TestCase):
     # @pytest.mark.focus
     @mock.patch('pkg_resources.find_distributions')
     @mock.patch('subprocess.Popen')
-    def test_verify_all_packages(self, popen_mock, find_dist_mock):
-        apk_packages = [
-            'python', 'python-dev',
-            'git',
-            'util-linux', 'procps',
-            'curl',  # 'wget',
-            'gcc', 'musl-dev', 'linux-headers'
-        ]
-        find_sys_pkg_cmd = ['apk', 'info']
-        requirements_file = '/requirements'
-
+    @mock.patch('amplifyhealthcheck.healthcheck.AmplifyAgentHealthCheck.check_file')
+    def test_verify_all_packages(self, check_file_mock, popen_mock, find_dist_mock):
+        check_file_mock.return_value = True
         find_dist_mock.return_value = [
             'gevent==1.1.0',
             'lockfile==0.11.0',
@@ -179,20 +187,24 @@ class HealthChckTestCase(TestCase):
         ]
         popen_mock.return_value.wait.return_value = 0
         self.healthcheck.verbose = False
-        fail_count = self.healthcheck.verify_all_packages(apk_packages, requirements_file, find_sys_pkg_cmd)
+        fail_count = self.healthcheck.verify_all_packages()
 
         assert fail_count == 0
 
+        check_file_mock.return_value = False
+        fail_count = self.healthcheck.verify_all_packages()
+
+        assert fail_count > 0
+
     # @xfail
     # @pytest.mark.focus
-    @mock.patch('os.path.exists')
-    def test_verify_agent_ps(self, path_exists_mock):
-        path_exists_mock.return_value = True
+    def test_verify_agent_ps(self):
+        self.healthcheck.amp_pid = 100
         fail_count = self.healthcheck.verify_agent_ps()
 
         assert fail_count == 0
 
-        path_exists_mock.return_value = False
+        self.healthcheck.amp_pid = None
         fail_count = self.healthcheck.verify_agent_ps()
 
         assert fail_count > 0
@@ -228,6 +240,12 @@ class HealthChckTestCase(TestCase):
 
         assert fail_count == 0
 
+        self.healthcheck.amp_owner = self.healthcheck.ngx_worker_onwer = None
+
+        fail_count = self.healthcheck.verify_agent_user()
+
+        assert fail_count > 0
+
         self.healthcheck.amp_owner = 'not_permitted_user'
         self.healthcheck.ngx_worker_onwer = 'permitted_user'
 
@@ -237,32 +255,35 @@ class HealthChckTestCase(TestCase):
 
     # @xfail
     # @pytest.mark.focus
+    @mock.patch('os.path.isabs')
     @mock.patch('psutil.Process')
-    def test_verify_ngx_start_process(self, process_mock):
+    def test_verify_ngx_master_ps(self, process_mock, is_abs_mock):
         process_mock.return_value.ppid.return_value = 1
-        fail_count = self.healthcheck.verify_ngx_start_process()
+        fail_count = self.healthcheck.verify_ngx_master_ps()
 
         assert fail_count == 0
 
-        process_mock.return_value.ppid.return_value = 87
-        fail_count = self.healthcheck.verify_ngx_start_process()
+        self.healthcheck.ngx_pid = None
+        fail_count = self.healthcheck.verify_ngx_master_ps()
 
         assert fail_count > 0
 
-    # @xfail
-    # @pytest.mark.focus
-    @mock.patch('os.path.isabs')
-    @mock.patch('psutil.Process')
-    def test_verify_ngx_start_path(self, process_mock, is_abs_mock):
+        self.healthcheck.ngx_pid = '100'
+        process_mock.return_value.ppid.return_value = 87
+        fail_count = self.healthcheck.verify_ngx_master_ps()
+
+        assert fail_count > 0
+
+        process_mock.return_value.ppid.return_value = 1
         is_abs_mock.return_value = True
         process_mock.return_value.exe.return_value = 'some_absolute_path'
-        fail_count = self.healthcheck.verify_ngx_start_path()
+        fail_count = self.healthcheck.verify_ngx_master_ps()
 
         assert fail_count == 0
 
         is_abs_mock.return_value = False
         process_mock.return_value.exe.return_value = 'some_relative_path'
-        fail_count = self.healthcheck.verify_ngx_start_path()
+        fail_count = self.healthcheck.verify_ngx_master_ps()
 
         assert fail_count > 0
 
@@ -285,14 +306,21 @@ class HealthChckTestCase(TestCase):
     @mock.patch('ntplib.NTPClient.request')
     @mock.patch('amplifyhealthcheck.healthcheck.AmplifyAgentHealthCheck.datetime_now')
     def test_verify_sys_time(self, datetime_now_mock, request_mock):
-        request_mock.return_value = mock.MagicMock(tx_time=1527079591.4245481)
-        datetime_now_mock.return_value = datetime(2018, 5, 23, 12, 46, 37, 728420)
+        now_datetime = datetime(2018, 5, 27, 12, 58, 59, 504275)
+        now_timestamp = 1527425939.5042753
+
+        request_mock.return_value = mock.MagicMock(tx_time=now_timestamp)
+        datetime_now_mock.return_value = now_datetime + timedelta(
+            seconds=self.healthcheck.sys_time_diff_max_allowance
+        )
         fail_count = self.healthcheck.verify_sys_time()
 
         assert fail_count == 0
 
-        request_mock.return_value = mock.MagicMock(tx_time=1527079591.4245481)
-        datetime_now_mock.return_value = datetime(2018, 5, 23, 13, 46, 37, 728420)
+        request_mock.return_value = mock.MagicMock(tx_time=now_timestamp)
+        datetime_now_mock.return_value = now_datetime + timedelta(
+            seconds=self.healthcheck.sys_time_diff_max_allowance + 1
+        )
         fail_count = self.healthcheck.verify_sys_time()
 
         assert fail_count > 0
@@ -307,6 +335,17 @@ class HealthChckTestCase(TestCase):
     @mock.patch('os.path.exists')
     @mock.patch('amplifyhealthcheck.healthcheck.Popen')
     def test_verify_ngx_stub_status(self, popen_mock, path_exists_mock):
+        path_exists_mock.return_value = True
+        popen_mock.return_value.communicate.return_value = (
+            'http_dav_module\nhttp_ssl_module\nhttp_stub_status_module\nhttp_gzip_static_module\nhttp_v2_module',
+            ''
+        )
+
+        fail_count = self.healthcheck.verify_ngx_stub_status()
+
+        assert fail_count == 0
+
+        self.healthcheck.verbose = False
         path_exists_mock.return_value = True
         popen_mock.return_value.communicate.return_value = (
             'http_dav_module\nhttp_ssl_module\nhttp_stub_status_module\nhttp_gzip_static_module\nhttp_v2_module',
@@ -357,7 +396,20 @@ class HealthChckTestCase(TestCase):
 
         assert fail_count == 0
 
+        self.healthcheck.verbose = False
+        getpwuid_mock.return_value = mock.MagicMock(pw_name='permitted_user')  # nginx
+        fail_count = self.healthcheck.verify_ngx_logs_read_access()
+
+        assert fail_count == 0
+
         getpwuid_mock.return_value = mock.MagicMock(pw_name='not_permitted_user')
+        fail_count = self.healthcheck.verify_ngx_logs_read_access()
+
+        assert fail_count > 0
+
+        self.teardown_method(None)
+        self.healthcheck.ngx_log_files = '/path_does_not_exist'
+        self.setup_method(None)
         fail_count = self.healthcheck.verify_ngx_logs_read_access()
 
         assert fail_count > 0
@@ -372,8 +424,21 @@ class HealthChckTestCase(TestCase):
 
         assert fail_count == 0
 
+        self.healthcheck.verbose = False
+        getpwuid_mock.return_value = mock.MagicMock(pw_name='permitted_user')  # nginx
+        fail_count = self.healthcheck.verify_ngx_config_files_access()
+
+        assert fail_count == 0
+
         getpwuid_mock.return_value = mock.MagicMock(pw_name='not_permitted_user')
         os_stat_mock.return_value = mock.MagicMock(st_mode=0)
+        fail_count = self.healthcheck.verify_ngx_config_files_access()
+
+        assert fail_count > 0
+
+        self.teardown_method(None)
+        self.healthcheck.ngx_all_confs_path = '/path_does_not_exist'
+        self.setup_method(None)
         fail_count = self.healthcheck.verify_ngx_config_files_access()
 
         assert fail_count > 0
@@ -381,25 +446,28 @@ class HealthChckTestCase(TestCase):
     # @xfail
     # @pytest.mark.focus
     def test_verify_ngx_metrics(self):
-        required_metrics = [
-            'sn="$server_name"',
-            'rt=$request_time',
-            'ua="$upstream_addr"',
-            'us="$upstream_status"',
-            'ut="$upstream_response_time"',
-            'ul="$upstream_response_length"',
-            'cs=$upstream_cache_status'
-        ]
-
-        fail_count = self.healthcheck.verify_ngx_metrics(required_metrics)
+        fail_count = self.healthcheck.verify_ngx_metrics()
 
         assert fail_count == 0
+
+        self.healthcheck.verbose = False
+        fail_count = self.healthcheck.verify_ngx_metrics()
+
+        assert fail_count == 0
+
+        self.teardown_method(None)
+        self.healthcheck.ngx_conf_file = '/path_does_not_exist'
+        self.setup_method(None)
+
+        fail_count = self.healthcheck.verify_ngx_metrics()
+
+        assert fail_count > 0
 
         self.teardown_method(None)
         self.healthcheck.ngx_conf_file = 'tests/fixtures/nginx_files/etc/nginx/nginx.conf.missing'
         self.setup_method(None)
 
-        fail_count = self.healthcheck.verify_ngx_metrics(required_metrics)
+        fail_count = self.healthcheck.verify_ngx_metrics()
 
         assert fail_count == 2
 

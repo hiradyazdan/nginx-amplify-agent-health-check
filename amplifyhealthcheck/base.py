@@ -52,7 +52,8 @@ class Base(object):
                 else:
                     tree.append(os.path.join(root, filename))
 
-        tree.pop(0)
+        if len(tree) > 0:
+            tree.pop(0)
 
         return tree
 
@@ -118,7 +119,7 @@ class Base(object):
         return os.stat(path)
 
     def datetime_now(self):
-        return datetime.now()
+        return datetime.utcnow()
 
     def pretty_print(self, message, message_type=''):
         if type(message) is list:
@@ -140,7 +141,7 @@ class Base(object):
 
     def decorate(self):
         if self.decorate_mode:
-            lines = ['check {0} - {1}'.format(i + 1, log) for i, log in enumerate(self.logs)]
+            lines = ['check {0} - {1}'.format(i + 1, log) for i, log in enumerate(sorted(set(self.logs)))]
             spchar_extra_width = len(self.mark + self.no_color) - 1
             width = max(len(line) for line in lines)
 
