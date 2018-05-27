@@ -1,8 +1,11 @@
 from setuptools import setup
 
 classifiers = [
-    ("Programming Language :: Python :: %s" % x)
-    for x in "2 2.7".split()
+    'License :: OSI Approved :: MIT License',
+    'Operating System :: POSIX'
+] + [
+    ('Programming Language :: Python :: %s' % x)
+    for x in '2.7'.split()
 ]
 
 test_requirements = [
@@ -18,12 +21,12 @@ test_requirements = [
     'requests'
 ]
 
-with open("README.md") as f:
+with open('README.rst', 'r') as f:
     long_description = f.read()
 
 setup(
     name='nginx-amplify-agent-health-check',
-    version='0.1.3',
+    version='0.1.4',
     description='Static and Dynamic Analysis for nginx-amplify-agent Health Status',
     long_description=long_description,
     url='https://github.com/hiradyazdan/nginx-amplify-agent-health-check',
