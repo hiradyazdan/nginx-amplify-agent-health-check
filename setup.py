@@ -37,7 +37,7 @@ setup(
     packages=['amplifyhealthcheck'],
     entry_points={
         'console_scripts': [
-            'amphc=amplifyhealthcheck.cmd:main'
+            'amphc=amplifyhealthcheck.cli:init_cli'
         ]
     },
     classifiers=classifiers,

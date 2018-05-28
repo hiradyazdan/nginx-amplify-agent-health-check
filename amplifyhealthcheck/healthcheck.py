@@ -239,9 +239,6 @@ class AmplifyAgentHealthCheck(Base):
             current_ntp_time = datetime.utcfromtimestamp(res)
             current_system_time = self.datetime_now()
 
-            print(current_ntp_time)
-            print(current_system_time)
-
             diff = abs(current_ntp_time - current_system_time)
             diff_in_secs = diff.days * 24 * 60 * 60 + diff.seconds
 
@@ -265,7 +262,7 @@ class AmplifyAgentHealthCheck(Base):
         ngx_conf_filename = self.file_name(self.ngx_conf_file)
         stub_status_module = 'http_stub_status_module'
 
-        nginx_version = Popen(['nginx', '-V'], stderr=PIPE)  # No idea why nginx -V redirects output to stderr
+        nginx_version = Popen(['nginx', '-V'], stderr=PIPE)
         nginx_trans = Popen(['tr', '--', '-', '\n'], stdin=nginx_version.stderr, stdout=PIPE)
         nginx_modules = Popen(['grep', '_module'], stdin=nginx_trans.stdout, stdout=PIPE)
         nginx_version.stderr.close()

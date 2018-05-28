@@ -121,18 +121,18 @@ class Base(object):
     def datetime_now(self):
         return datetime.utcnow()
 
-    def pretty_print(self, message, message_type=''):
+    def pretty_print(self, message, message_type='', mark=True):
         if type(message) is list:
             message = ' '.join([str(item) for item in message])
 
         if message_type is 'error':
-            self.mark = self.red_color + self.crossmark.encode('utf-8')
+            self.mark = self.red_color + (self.crossmark.encode('utf-8') + ' ' if mark else '')
         elif message_type is 'warn':
-            self.mark = self.yellow_color + self.warnmark.encode('utf-8')
+            self.mark = self.yellow_color + (self.warnmark.encode('utf-8') + ' ' if mark else '')
         else:
-            self.mark = self.green_color + self.checkmark.encode('utf-8')
+            self.mark = self.green_color + (self.checkmark.encode('utf-8') + ' ' if mark else '')
 
-        message = "{0} {1}{2}".format(self.mark, message, self.no_color)
+        message = "{0}{1}{2}".format(self.mark, message, self.no_color)
 
         if self.decorate_mode:
             self.logs.append(message)
@@ -142,7 +142,7 @@ class Base(object):
     def decorate(self):
         if self.decorate_mode:
             lines = ['check {0} - {1}'.format(i + 1, log) for i, log in enumerate(sorted(set(self.logs)))]
-            spchar_extra_width = len(self.mark + self.no_color) - 1
+            spchar_extra_width = len(self.mark + self.no_color) - 2
             width = max(len(line) for line in lines)
 
             log_list = [self.ltopbord + self.mdlbord * (width - spchar_extra_width) + self.rtopbord]
