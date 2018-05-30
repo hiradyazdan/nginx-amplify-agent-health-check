@@ -1,5 +1,4 @@
 import argparse
-import textwrap
 import pkg_resources
 
 from . import configure
@@ -7,8 +6,34 @@ from healthcheck import AmplifyAgentHealthCheck
 
 
 def init_cli():
-    version = pkg_resources.require('nginx-amplify-agent-health-check')[0].version,
+    public_methods = verification_methods()
+    args = cli_args()
 
+    public_methods = [
+        method for method in public_methods
+        if not method.startswith('verify_all_')
+        and method not in args.get('skip_methods', [])
+    ]
+
+    try:
+        amphc = configure(**args)
+
+        for method in args.get('skip_methods', public_methods):
+            callable(getattr(amphc, method))
+
+        for method in args.get('methods', public_methods):
+            getattr(amphc, method)()
+
+        return True
+    except AttributeError, exc:
+        amphc.decorate_mode = False
+        amphc.pretty_print(exc, 'error', False)
+
+        return False
+
+
+def cli_args():
+    version = pkg_resources.require('nginx-amplify-agent-health-check')[0].version
     public_methods = verification_methods()
     epilog_content = []
 
@@ -19,11 +44,11 @@ def init_cli():
         prog='amphc',
         usage=None,
         description='Static and Dynamic Analysis for nginx-amplify-agent Health Status',
-        epilog=textwrap.dedent('''
+        epilog='''
 verification methods:
 ---------------------
   {}
-'''.format('\n\t'.expandtabs(2).join(epilog_content))),
+'''.format('\n\t'.expandtabs(2).join(epilog_content)),
         parents=[],
         formatter_class=argparse.RawTextHelpFormatter,
         prefix_chars='-',
@@ -39,13 +64,13 @@ verification methods:
         '-V', '--version',
         dest='version',
         action='version',
-        version='This is %(prog)s version ' + version[0],
-        help='print version information and exit'
+        version='This is %(prog)s version ' + version,
+        help="show amphc version number"
     )
 
     parser.add_argument(
         '-v', '--verbose',
-        dest='verbose', action='store_true',  help='print all check logs'
+        dest='verbose', action='store_true',  help='show all check logs'
     )
     parser.add_argument(
         '-d', '--plain',
@@ -59,27 +84,17 @@ verification methods:
 
     group.add_argument(
         '-x', '--skip',
-        dest='skip_methods', action='store', nargs='+', help='specify methods to skip from being verified'
+        dest='skip_methods', action='store', nargs='+', help='specify methods to skip running'
     )
 
     group.add_argument(
-        '-k', '--only',
-        dest='keep_methods', action='store', nargs='+', help='specify the only methods to be verified'
+        '-m', '--methods',
+        dest='methods', action='store', nargs='+', help='specify methods to run'
     )
 
-    args = parser.parse_args()
-    args = vars(args)
+    args = vars(parser.parse_args())
 
-    amphc = configure(**args)
-
-    public_methods = [
-        method for method in public_methods
-        if not method.startswith('verify_all_')
-        and method not in args.get('skip_methods', [])
-    ]
-
-    for method in args.get('keep_methods', public_methods):
-        getattr(amphc, method)()
+    return args
 
 
 def verification_methods():

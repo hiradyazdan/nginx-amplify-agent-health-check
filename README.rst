@@ -77,22 +77,21 @@ cli options
 .. code:: console
 
     usage: amphc [-h] [-V] [-v] [-d] [-c CONFIG_FILE]
-                 [-x SKIP_METHODS [SKIP_METHODS ...] | -k KEEP_METHODS
-                 [KEEP_METHODS ...]]
+                 [-x SKIP_METHODS [SKIP_METHODS ...] | -m METHODS [METHODS ...]]
 
     Static and Dynamic Analysis for nginx-amplify-agent Health Status
 
     optional arguments:
       -h, --help            show this help message and exit
-      -V, --version         print version information and exit
-      -v, --verbose         print all check logs
+      -V, --version         show program's version information and exit
+      -v, --verbose         show all check logs
       -d, --plain           suppress decorating logs
       -c CONFIG_FILE, --config CONFIG_FILE
-                            set configuration file path
+                            set configuration file path (i.e. in ini format)
       -x SKIP_METHODS [SKIP_METHODS ...], --skip SKIP_METHODS [SKIP_METHODS ...]
-                            specify methods to skip from being verified
-      -k KEEP_METHODS [KEEP_METHODS ...], --only KEEP_METHODS [KEEP_METHODS ...]
-                            specify the only methods to be verified
+                            specify methods to skip running
+      -m METHODS [METHODS ...], --methods METHODS [METHODS ...]
+                            specify methods to run
 
     verification methods:
     ---------------------

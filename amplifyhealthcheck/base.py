@@ -140,7 +140,7 @@ class Base(object):
             print(message)
 
     def decorate(self):
-        if self.decorate_mode:
+        if self.decorate_mode and len(self.logs) > 0 and self.mark is not None:
             lines = ['check {0} - {1}'.format(i + 1, log) for i, log in enumerate(sorted(set(self.logs)))]
             spchar_extra_width = len(self.mark + self.no_color) - 2
             width = max(len(line) for line in lines)
