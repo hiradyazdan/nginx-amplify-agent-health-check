@@ -1,6 +1,7 @@
 from setuptools import setup
 
 classifiers = [
+    'Intended Audience :: Developers',
     'License :: OSI Approved :: MIT License',
     'Operating System :: POSIX'
 ] + [

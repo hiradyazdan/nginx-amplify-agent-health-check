@@ -65,7 +65,7 @@ the ini formatting.
 
 ## Usage
 
-#### via cli interface:
+#### via cli:
 
 ```console
 amphc
@@ -81,7 +81,7 @@ Static and Dynamic Analysis for nginx-amplify-agent Health Status
 
 optional arguments:
   -h, --help            show this help message and exit
-  -V, --version         show program's version information and exit
+  -V, --version         show amphc version number
   -v, --verbose         show all check logs
   -d, --plain           suppress decorating logs
   -c CONFIG_FILE, --config CONFIG_FILE
@@ -112,7 +112,7 @@ verification methods:
   17) verify_sys_time
 ```
 
-#### via api interface:
+#### via api:
 
 ```python
 import amplifyhealthcheck as amphc
@@ -139,3 +139,11 @@ amphc.verify_proc_sys_access()
 amphc.verify_dns_resolver()
 amphc.verify_metrics_collection()
 ```
+
+## Contributing
+
+- Fork it ( https://github.com/hiradyazdan/nginx-amplify-agent-health-check/fork )
+- Create your feature branch with your initials (git checkout -b hy/my-new-feature)
+- Commit your changes (git commit -am 'Add some feature')
+- Push to the branch (git push origin my-new-feature)
+- Create new Pull Request
